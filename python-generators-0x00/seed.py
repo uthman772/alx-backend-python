@@ -25,3 +25,4 @@ if connection:
         rows = cursor.fetchall()
         print(rows)
         cursor.close()
+        
