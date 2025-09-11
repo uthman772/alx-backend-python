@@ -15,18 +15,17 @@ class DatabaseConnection:
         if self.conn:
             self.conn.close()
 
+# Example usage
 if __name__ == "__main__":
-    db_file = "example.db"
-    # Setup: create table and insert sample data if not exists
-    with sqlite3.connect(db_file) as conn:
+    # Setup: create a sample database and table if not exists
+    with sqlite3.connect("example.db") as conn:
         cur = conn.cursor()
         cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")
-        cur.execute("INSERT INTO users (name) VALUES ('Alice')")
-        cur.execute("INSERT INTO users (name) VALUES ('Bob')")
+        cur.execute("INSERT OR IGNORE INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')")
         conn.commit()
 
     # Use the custom context manager
-    with DatabaseConnection(db_file) as cursor:
+    with DatabaseConnection("example.db") as cursor:
         cursor.execute("SELECT * FROM users")
         results = cursor.fetchall()
         print(results)
