@@ -124,9 +124,9 @@ class TestIntegrationGithubOrgClient(unittest.TestCase):
         # Define the side_effect function to return different payloads based on URL
         def get_payload(url):
             """Return appropriate payload based on URL"""
-            if url.endswith("/orgs/testorg"):
+            if url == "https://api.github.com/orgs/testorg":
                 return cls.org_payload
-            elif url.endswith("/repos"):
+            elif url == cls.org_payload["repos_url"]:
                 return cls.repos_payload
             return {}
         
@@ -143,23 +143,23 @@ class TestIntegrationGithubOrgClient(unittest.TestCase):
         cls.get_patcher.stop()
 
     def test_public_repos(self):
-        """Integration test for public_repos method"""
+        """Integration test for public_repos method - returns expected results based on fixtures"""
         # Create client instance
         client = GithubOrgClient("testorg")
         
         # Call public_repos method
         result = client.public_repos()
         
-        # Verify the result matches expected repos
+        # Verify the result matches expected repos from fixtures
         self.assertEqual(result, self.expected_repos)
 
     def test_public_repos_with_license(self):
-        """Integration test for public_repos method with license filter"""
+        """Integration test for public_repos with license="apache-2.0" - returns expected results based on fixtures"""
         # Create client instance
         client = GithubOrgClient("testorg")
         
-        # Call public_repos method with license filter
+        # Call public_repos method with Apache 2.0 license filter
         result = client.public_repos(license="apache-2.0")
         
-        # Verify the result matches expected Apache2 repos
+        # Verify the result matches expected Apache2 licensed repos from fixtures
         self.assertEqual(result, self.apache2_repos)
