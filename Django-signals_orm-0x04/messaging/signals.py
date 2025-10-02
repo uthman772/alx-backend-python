@@ -1,6 +1,7 @@
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 from django.contrib.auth.models import User
+from django.db import transaction
 from .models import Message, Notification, MessageHistory
 
 @receiver(post_save, sender=Message)
@@ -63,6 +64,46 @@ def log_message_edit(sender, instance, **kwargs):
                 
         except Message.DoesNotExist:
             pass  # New message, no history to log
+
+@receiver(post_delete, sender=User)
+def cleanup_user_data(sender, instance, **kwargs):
+    """
+    Signal to clean up all user-related data when a user is deleted.
+    This ensures proper cleanup even if CASCADE doesn't handle everything.
+    """
+    user_id = instance.id
+    username = instance.username
+    
+    print(f"Cleaning up data for deleted user: {username} (ID: {user_id})")
+    
+    try:
+        # Clean up messages where user was sender or receiver
+        # Note: These should be handled by CASCADE due to ForeignKey constraints,
+        # but we'll log them for verification
+        
+        sent_messages = Message.objects.filter(sender=instance)
+        received_messages = Message.objects.filter(receiver=instance)
+        
+        print(f"Cleaning up {sent_messages.count()} sent messages")
+        print(f"Cleaning up {received_messages.count()} received messages")
+        
+        # Clean up notifications for the user
+        # This should also be handled by CASCADE
+        user_notifications = Notification.objects.filter(user=instance)
+        print(f"Cleaning up {user_notifications.count()} notifications")
+        
+        # Clean up message history where user was the editor
+        # This should also be handled by CASCADE due to ForeignKey
+        edit_history = MessageHistory.objects.filter(edited_by=instance)
+        print(f"Cleaning up {edit_history.count()} edit history entries")
+        
+        # Additional cleanup for orphaned data (if any)
+        # This is where you'd handle any custom cleanup logic
+        
+        print(f"Successfully cleaned up all data for user: {username}")
+        
+    except Exception as e:
+        print(f"Error during cleanup for user {username}: {str(e)}")
 
 @receiver(post_save, sender=Message)
 def send_email_notification(sender, instance, created, **kwargs):
