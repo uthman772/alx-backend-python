@@ -5,56 +5,148 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Prefetch, Q
 from .models import Message, Notification, MessageHistory
 
 @login_required
-def message_detail(request, message_id):
+def message_thread(request, message_id):
     """
-    View to display message details and edit history.
+    View to display a message thread with all replies in threaded format.
+    Uses optimized queries with select_related and prefetch_related.
     """
-    message = get_object_or_404(Message, pk=message_id)
+    root_message = get_object_or_404(Message, pk=message_id)
     
-    # Check if user has permission to view this message
-    if message.sender != request.user and message.receiver != request.user:
+    # Check if user has permission to view this thread
+    if root_message.sender != request.user and root_message.receiver != request.user:
         return render(request, 'messaging/access_denied.html')
     
-    # Get message history
-    message_history = message.history.all().order_by('-edited_at')
+    # Get the entire thread with optimized queries
+    thread_messages = Message.objects.get_conversation_thread(root_message)
+    
+    # Mark messages as read when viewing thread
+    unread_messages = thread_messages.filter(
+        receiver=request.user, 
+        is_read=False
+    )
+    unread_messages.update(is_read=True)
     
     context = {
-        'message': message,
-        'message_history': message_history,
+        'root_message': root_message,
+        'thread_messages': thread_messages,
+        'thread_tree': build_thread_tree(thread_messages),
     }
     
-    return render(request, 'messaging/message_detail.html', context)
+    return render(request, 'messaging/message_thread.html', context)
 
 @login_required
-def message_history_api(request, message_id):
+def create_reply(request, message_id):
     """
-    API endpoint to get message history as JSON.
+    View to handle creating replies to messages.
     """
-    message = get_object_or_404(Message, pk=message_id)
+    parent_message = get_object_or_404(Message, pk=message_id)
     
-    # Check if user has permission to view this message
-    if message.sender != request.user and message.receiver != request.user:
+    # Check if user has permission to reply to this message
+    if parent_message.sender != request.user and parent_message.receiver != request.user:
+        return render(request, 'messaging/access_denied.html')
+    
+    if request.method == 'POST':
+        content = request.POST.get('content', '').strip()
+        
+        if content:
+            reply = Message.objects.create(
+                sender=request.user,
+                receiver=parent_message.sender if request.user != parent_message.sender else parent_message.receiver,
+                subject=f"Re: {parent_message.subject}",
+                content=content,
+                parent_message=parent_message
+            )
+            
+            messages.success(request, "Your reply has been sent.")
+            return redirect('messaging:message_thread', message_id=parent_message.get_thread_root().pk)
+        else:
+            messages.error(request, "Please provide content for your reply.")
+    
+    context = {
+        'parent_message': parent_message,
+    }
+    return render(request, 'messaging/create_reply.html', context)
+
+@login_required
+def conversation_list(request):
+    """
+    View to display all conversations for the current user.
+    Uses optimized queries to get root messages with reply counts.
+    """
+    # Get root messages with optimized queries
+    conversations = Message.objects.get_root_messages(request.user)
+    
+    context = {
+        'conversations': conversations,
+    }
+    return render(request, 'messaging/conversation_list.html', context)
+
+@login_required
+def conversation_thread_api(request, message_id):
+    """
+    API endpoint to get conversation thread as JSON for AJAX loading.
+    """
+    root_message = get_object_or_404(Message, pk=message_id)
+    
+    # Check if user has permission to view this thread
+    if root_message.sender != request.user and root_message.receiver != request.user:
         return JsonResponse({'error': 'Access denied'}, status=403)
     
-    history_data = []
-    for history in message.history.all().order_by('-edited_at'):
-        history_data.append({
-            'old_subject': history.old_subject,
-            'old_content': history.old_content,
-            'edited_by': history.edited_by.username,
-            'edited_at': history.edited_at.isoformat(),
+    # Get thread with optimized queries
+    thread_messages = Message.objects.get_conversation_thread(root_message)
+    
+    thread_data = []
+    for msg in thread_messages:
+        thread_data.append({
+            'id': msg.id,
+            'sender': msg.sender.username,
+            'receiver': msg.receiver.username,
+            'subject': msg.subject,
+            'content': msg.content,
+            'timestamp': msg.timestamp.isoformat(),
+            'is_read': msg.is_read,
+            'depth': msg.depth,
+            'parent_id': msg.parent_message.id if msg.parent_message else None,
+            'is_root': msg.is_root_message,
         })
     
-    return JsonResponse({'history': history_data})
+    return JsonResponse({
+        'thread': thread_data,
+        'root_message_id': root_message.id
+    })
+
+def build_thread_tree(messages_queryset):
+    """
+    Helper function to build a thread tree structure from a flat queryset.
+    """
+    messages_dict = {}
+    root_messages = []
+    
+    # Create dictionary for quick lookup
+    for message in messages_queryset:
+        messages_dict[message.id] = {
+            'message': message,
+            'replies': []
+        }
+    
+    # Build tree structure
+    for message in messages_queryset:
+        if message.parent_message:
+            parent_id = message.parent_message.id
+            if parent_id in messages_dict:
+                messages_dict[parent_id]['replies'].append(messages_dict[message.id])
+        else:
+            root_messages.append(messages_dict[message.id])
+    
+    return root_messages
 
 @login_required
 def delete_account_confirmation(request):
-    """
-    View to show account deletion confirmation page.
-    """
+    """View to show account deletion confirmation page."""
     user = request.user
     
     # Get counts of user's data
@@ -77,9 +169,7 @@ def delete_account_confirmation(request):
 @login_required
 @transaction.atomic
 def delete_account(request):
-    """
-    View to handle user account deletion.
-    """
+    """View to handle user account deletion."""
     if request.method == 'POST':
         user = request.user
         username = user.username
@@ -95,34 +185,25 @@ def delete_account(request):
             # Delete the user (this will trigger the post_delete signal)
             user.delete()
             
-            # Success message
             messages.success(
                 request, 
-                f"Your account '{username}' has been successfully deleted. "
-                f"All your data including {sent_messages_count} sent messages, "
-                f"{received_messages_count} received messages, and related data "
-                f"has been permanently removed."
+                f"Your account '{username}' has been successfully deleted."
             )
             
             return redirect('home')
             
         except Exception as e:
-            # Handle any errors during deletion
             messages.error(
                 request,
-                f"An error occurred while deleting your account: {str(e)}. "
-                "Please try again or contact support."
+                f"An error occurred while deleting your account: {str(e)}"
             )
             return redirect('delete_account_confirmation')
     
-    # If not POST, redirect to confirmation page
     return redirect('delete_account_confirmation')
 
 @login_required
 def user_data_summary(request):
-    """
-    API endpoint to get summary of user's data (for AJAX calls).
-    """
+    """API endpoint to get summary of user's data."""
     user = request.user
     
     data = {
