@@ -1,1 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Delete Account Confirmation</title>
+    <style>
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .warning-box {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .data-summary {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .data-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .confirmation-input {
+            margin: 15px 0;
+        }
+        .confirmation-input input {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .actions {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Delete Your Account</h1>
+        
+        <div class="warning-box">
+            <strong>⚠️ Warning: This action cannot be undone!</strong>
+            <p>Once you delete your account, all your data will be permanently removed from our systems.</p>
+        </div>
+        
+        <div class="data-summary">
+            <h3>Data that will be deleted:</h3>
+            <div class="data-item">
+                <span>Sent Messages:</span>
+                <strong>{{ sent_messages_count }}</strong>
+            </div>
+            <div class="data-item">
+                <span>Received Messages:</span>
+                <strong>{{ received_messages_count }}</strong>
+            </div>
+            <div class="data-item">
+                <span>Notifications:</span>
+                <strong>{{ notifications_count }}</strong>
+            </div>
+            <div class="data-item">
+                <span>Edit History Entries:</span>
+                <strong>{{ edit_history_count }}</strong>
+            </div>
+            <div class="data-item" style="border-top: 2px solid #495057; font-weight: bold;">
+                <span>Total Data Points:</span>
+                <strong>{{ total_data_count }}</strong>
+            </div>
+        </div>
+        
+        <form method="post" action="{% url 'delete_account' %}">
+            {% csrf_token %}
+            
+            <div class="confirmation-input">
+                <label for="confirm_username">
+                    To confirm, please type your username: <strong>{{ user.username }}</strong>
+                </label>
+                <input type="text" id="confirm_username" name="confirm_username" 
+                       placeholder="Type your username here" required>
+            </div>
+            
+            <div class="actions">
+                <button type="submit" class="btn-danger" 
+                        onclick="return confirm('Are you absolutely sure? This cannot be undone!')">
+                    🗑️ Permanently Delete My Account
+                </button>
+                <a href="{% url 'home' %}" class="btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const confirmInput = document.getElementById('confirm_username');
+            const submitButton = document.querySelector('.btn-danger');
+            const username = "{{ user.username }}";
+            
+            function validateConfirmation() {
+                if (confirmInput.value === username) {
+                    submitButton.disabled = false;
+                    submitButton.style.opacity = '1';
+                } else {
+                    submitButton.disabled = true;
+                    submitButton.style.opacity = '0.6';
+                }
+            }
+            
+            confirmInput.addEventListener('input', validateConfirmation);
+            validateConfirmation(); // Initial check
+        });
+    </script>
+</body>
+</html>
