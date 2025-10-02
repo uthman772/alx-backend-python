@@ -1,1 +1,16 @@
-
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Home</title>
+</head>
+<body>
+    <h1>Welcome to Messaging App</h1>
+    {% if user.is_authenticated %}
+        <p>Hello, {{ user.username }}!</p>
+        <a href="{% url 'messaging:delete_account_confirmation' %}">Delete Account</a>
+        <a href="{% url 'admin:logout' %}">Logout</a>
+    {% else %}
+        <p>Please <a href="{% url 'admin:login' %}">login</a> to continue.</p>
+    {% endif %}
+</body>
+</html>
