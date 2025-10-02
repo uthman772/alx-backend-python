@@ -1,6 +1,11 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
 from .models import Message, Notification
+from django.urls import reverse
+from django.test import TestCase, Client
+from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+
 
 class MessageModelTest(TestCase):
     def setUp(self):
@@ -281,3 +286,158 @@ class MessageHistoryModelTest(TestCase):
         self.assertEqual(str(history), expected_str)      
         expected_str = f"Notification for {self.user.username}: Test Notification Title"
         self.assertEqual(str(notification), expected_str)
+
+
+class UserDeletionTest(TestCase):
+    def setUp(self):
+        """Set up test users and data"""
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='test@example.com',
+            password='testpass123'
+        )
+        self.other_user = User.objects.create_user(
+            username='otheruser',
+            email='other@example.com',
+            password='testpass123'
+        )
+        
+        # Create test data for the user
+        self.message_sent = Message.objects.create(
+            sender=self.user,
+            receiver=self.other_user,
+            subject='Test Sent Message',
+            content='This is a sent message'
+        )
+        
+        self.message_received = Message.objects.create(
+            sender=self.other_user,
+            receiver=self.user,
+            subject='Test Received Message',
+            content='This is a received message'
+        )
+        
+        self.notification = Notification.objects.create(
+            user=self.user,
+            message=self.message_received,
+            title='Test Notification',
+            message_preview='Test preview'
+        )
+        
+        self.message_history = MessageHistory.objects.create(
+            message=self.message_sent,
+            old_subject='Old Subject',
+            old_content='Old content',
+            edited_by=self.user
+        )
+
+    def test_delete_account_confirmation_view(self):
+        """Test the account deletion confirmation page"""
+        self.client.login(username='testuser', password='testpass123')
+        response = self.client.get(reverse('messaging:delete_account_confirmation'))
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'messaging/delete_account_confirmation.html')
+        self.assertContains(response, 'Delete Your Account')
+        self.assertContains(response, str(self.user.username))
+
+    def test_delete_account_view_post(self):
+        """Test account deletion via POST request"""
+        self.client.login(username='testuser', password='testpass123')
+        
+        # Count data before deletion
+        user_count_before = User.objects.count()
+        sent_messages_before = Message.objects.filter(sender=self.user).count()
+        received_messages_before = Message.objects.filter(receiver=self.user).count()
+        
+        # Delete account
+        response = self.client.post(reverse('messaging:delete_account'), {
+            'confirm_username': 'testuser'
+        }, follow=True)
+        
+        # Check that user was deleted
+        user_count_after = User.objects.count()
+        self.assertEqual(user_count_after, user_count_before - 1)
+        
+        # Check that user no longer exists
+        with self.assertRaises(User.DoesNotExist):
+            User.objects.get(username='testuser')
+        
+        # Check redirect and message
+        self.assertRedirects(response, reverse('home'))
+        self.assertContains(response, 'successfully deleted')
+
+    def test_delete_account_invalid_confirmation(self):
+        """Test account deletion with invalid username confirmation"""
+        self.client.login(username='testuser', password='testpass123')
+        
+        user_count_before = User.objects.count()
+        
+        # Try to delete with wrong username
+        response = self.client.post(reverse('messaging:delete_account'), {
+            'confirm_username': 'wrongusername'
+        })
+        
+        # User should not be deleted
+        user_count_after = User.objects.count()
+        self.assertEqual(user_count_after, user_count_before)
+        
+        # Should redirect back to confirmation
+        self.assertEqual(response.status_code, 302)
+
+    def test_user_data_cleanup_signal(self):
+        """Test that user data is cleaned up when user is deleted"""
+        # Count related data
+        sent_messages_before = Message.objects.filter(sender=self.user).count()
+        received_messages_before = Message.objects.filter(receiver=self.user).count()
+        notifications_before = Notification.objects.filter(user=self.user).count()
+        history_before = MessageHistory.objects.filter(edited_by=self.user).count()
+        
+        # Verify data exists
+        self.assertGreater(sent_messages_before, 0)
+        self.assertGreater(received_messages_before, 0)
+        self.assertGreater(notifications_before, 0)
+        self.assertGreater(history_before, 0)
+        
+        # Delete user
+        self.user.delete()
+        
+        # Check that related data is cleaned up
+        sent_messages_after = Message.objects.filter(sender__username='testuser').count()
+        received_messages_after = Message.objects.filter(receiver__username='testuser').count()
+        notifications_after = Notification.objects.filter(user__username='testuser').count()
+        history_after = MessageHistory.objects.filter(edited_by__username='testuser').count()
+        
+        self.assertEqual(sent_messages_after, 0)
+        self.assertEqual(received_messages_after, 0)
+        self.assertEqual(notifications_after, 0)
+        self.assertEqual(history_after, 0)
+
+    def test_user_data_summary_api(self):
+        """Test the user data summary API endpoint"""
+        self.client.login(username='testuser', password='testpass123')
+        
+        response = self.client.get(reverse('messaging:user_data_summary'))
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        
+        self.assertIn('sent_messages', data)
+        self.assertIn('received_messages', data)
+        self.assertIn('notifications', data)
+        self.assertIn('edit_history', data)
+        
+        self.assertEqual(data['sent_messages'], 1)
+        self.assertEqual(data['received_messages'], 1)
+        self.assertEqual(data['notifications'], 1)
+        self.assertEqual(data['edit_history'], 1)
+
+    def test_delete_account_requires_login(self):
+        """Test that account deletion requires authentication"""
+        # Try to access without login
+        response = self.client.get(reverse('messaging:delete_account_confirmation'))
+        self.assertNotEqual(response.status_code, 200)  # Should redirect to login
+        
+        response = self.client.post(reverse('messaging:delete_account'))
+        self.assertNotEqual(response.status_code, 200)  # Should redirect to login
