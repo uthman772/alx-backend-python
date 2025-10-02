@@ -1,1 +1,27 @@
-
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Access Denied</title>
+    <style>
+        .container {
+            max-width: 500px;
+            margin: 100px auto;
+            text-align: center;
+            padding: 20px;
+        }
+        .error-icon {
+            font-size: 48px;
+            color: #dc3545;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-icon">🚫</div>
+        <h1>Access Denied</h1>
+        <p>You don't have permission to access this page.</p>
+        <a href="{% url 'home' %}">Return to Home</a>
+    </div>
+</body>
+</html>
