@@ -8,19 +8,40 @@ from .models import Message, Notification, MessageHistory
 def create_message_notification(sender, instance, created, **kwargs):
     """
     Signal to create a notification when a new message is created.
+    Handles both regular messages and replies.
     """
     if created:
-        # Create notification for the receiver
-        notification = Notification.objects.create(
-            user=instance.receiver,
+        if instance.parent_message:
+            # This is a reply - notify the parent message sender
+            notification_type = 'reply'
+            title = f"New reply from {instance.sender.username}"
+            # Also notify the receiver if they're different from the parent sender
+            if instance.receiver != instance.parent_message.sender:
+                # Create notification for the direct receiver too
+                Notification.objects.create(
+                    user=instance.receiver,
+                    message=instance,
+                    notification_type='message',
+                    title=f"New message from {instance.sender.username}",
+                    message_preview=f"{instance.subject}: {instance.content[:100]}..."
+                )
+        else:
+            # This is a new conversation
+            notification_type = 'message'
+            title = f"New message from {instance.sender.username}"
+        
+        # Create notification for the appropriate user
+        notification_user = instance.parent_message.sender if instance.parent_message else instance.receiver
+        
+        Notification.objects.create(
+            user=notification_user,
             message=instance,
-            notification_type='message',
-            title=f"New message from {instance.sender.username}",
+            notification_type=notification_type,
+            title=title,
             message_preview=f"{instance.subject}: {instance.content[:100]}..."
         )
         
-        print(f"Notification created for {instance.receiver.username}: "
-              f"New message from {instance.sender.username}")
+        print(f"Notification created for {notification_user.username}: {title}")
 
 @receiver(pre_save, sender=Message)
 def log_message_edit(sender, instance, **kwargs):
@@ -37,8 +58,6 @@ def log_message_edit(sender, instance, **kwargs):
                 original.subject != instance.subject):
                 
                 # Determine who is editing the message
-                # In a real app, you'd get this from the request
-                # For now, we'll use the sender or a system user
                 edited_by = instance.sender
                 
                 # Create message history entry
@@ -59,17 +78,24 @@ def log_message_edit(sender, instance, **kwargs):
                 )
                 
                 print(f"Message edit logged for message ID {instance.pk}")
-                print(f"Old subject: {original.subject}")
-                print(f"New subject: {instance.subject}")
                 
         except Message.DoesNotExist:
             pass  # New message, no history to log
+
+@receiver(pre_save, sender=Message)
+def handle_reply_subject(sender, instance, **kwargs):
+    """
+    Signal to automatically set subject for replies.
+    """
+    if instance.parent_message and not instance.pk:
+        # New reply - set subject automatically
+        if not instance.subject.startswith('Re: '):
+            instance.subject = f"Re: {instance.parent_message.subject}"
 
 @receiver(post_delete, sender=User)
 def cleanup_user_data(sender, instance, **kwargs):
     """
     Signal to clean up all user-related data when a user is deleted.
-    This ensures proper cleanup even if CASCADE doesn't handle everything.
     """
     user_id = instance.id
     username = instance.username
@@ -77,60 +103,36 @@ def cleanup_user_data(sender, instance, **kwargs):
     print(f"Cleaning up data for deleted user: {username} (ID: {user_id})")
     
     try:
-        # Clean up messages where user was sender or receiver
-        # Note: These should be handled by CASCADE due to ForeignKey constraints,
-        # but we'll log them for verification
-        
+        # Log cleanup information
         sent_messages = Message.objects.filter(sender=instance)
         received_messages = Message.objects.filter(receiver=instance)
         
         print(f"Cleaning up {sent_messages.count()} sent messages")
         print(f"Cleaning up {received_messages.count()} received messages")
         
-        # Clean up notifications for the user
-        # This should also be handled by CASCADE
         user_notifications = Notification.objects.filter(user=instance)
         print(f"Cleaning up {user_notifications.count()} notifications")
         
-        # Clean up message history where user was the editor
-        # This should also be handled by CASCADE due to ForeignKey
         edit_history = MessageHistory.objects.filter(edited_by=instance)
         print(f"Cleaning up {edit_history.count()} edit history entries")
-        
-        # Additional cleanup for orphaned data (if any)
-        # This is where you'd handle any custom cleanup logic
         
         print(f"Successfully cleaned up all data for user: {username}")
         
     except Exception as e:
         print(f"Error during cleanup for user {username}: {str(e)}")
 
-@receiver(post_save, sender=Message)
-def send_email_notification(sender, instance, created, **kwargs):
-    """
-    Optional: Signal to send email notification when a new message is created or edited.
-    """
-    if created:
-        print(f"Email notification would be sent to {instance.receiver.email} "
-              f"for message from {instance.sender.username}")
-    else:
-        if instance.edited:
-            print(f"Edit notification would be sent to {instance.receiver.email} "
-                  f"for edited message from {instance.sender.username}")
-
 def user_post_save_receiver(sender, instance, created, **kwargs):
     """
     Example signal for user creation (optional bonus)
     """
     if created:
-        # Find admin user or create system message
         try:
             admin_user = User.objects.get(username='admin')
             welcome_message = Message.objects.create(
                 sender=admin_user,
                 receiver=instance,
                 subject="Welcome to our messaging platform!",
-                content="Welcome! We're glad to have you here."
+                content="Welcome! We're glad to have you here. You can start conversations and reply to messages."
             )
             print(f"Welcome message created for new user: {instance.username}")
         except User.DoesNotExist:
