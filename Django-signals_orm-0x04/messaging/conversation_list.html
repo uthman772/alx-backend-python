@@ -1,1 +1,109 @@
-
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Conversations</title>
+    <style>
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .conversation-list {
+            margin-top: 20px;
+        }
+        .conversation-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .conversation-item:hover {
+            background: #f8f9fa;
+        }
+        .conversation-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .conversation-subject {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #333;
+        }
+        .conversation-participants {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .conversation-meta {
+            display: flex;
+            justify-content: space-between;
+            color: #888;
+            font-size: 0.8em;
+        }
+        .reply-count {
+            background: #007bff;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+        }
+        .unread-badge {
+            background: #dc3545;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.7em;
+            margin-left: 5px;
+        }
+        .new-conversation-btn {
+            background: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>My Conversations</h1>
+        
+        <button class="new-conversation-btn" onclick="location.href='{% url 'admin:messaging_message_add' %}'">
+            Start New Conversation
+        </button>
+        
+        <div class="conversation-list">
+            {% for conversation in conversations %}
+            <div class="conversation-item" onclick="location.href='{% url 'messaging:message_thread' conversation.pk %}'">
+                <div class="conversation-header">
+                    <span class="conversation-subject">{{ conversation.subject }}</span>
+                    {% if conversation.reply_count > 0 %}
+                        <span class="reply-count">{{ conversation.reply_count }} replies</span>
+                    {% endif %}
+                    {% if conversation.has_unread_replies %}
+                        <span class="unread-badge">Unread</span>
+                    {% endif %}
+                </div>
+                <div class="conversation-participants">
+                    Between: {{ conversation.sender.username }} and {{ conversation.receiver.username }}
+                </div>
+                <div class="conversation-meta">
+                    <span>Started: {{ conversation.timestamp|date:"M d, Y H:i" }}</span>
+                    <span>Last activity: {{ conversation.timestamp|timesince }} ago</span>
+                </div>
+            </div>
+            {% empty %}
+            <div class="no-conversations">
+                <p>No conversations yet. Start a new conversation!</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>
