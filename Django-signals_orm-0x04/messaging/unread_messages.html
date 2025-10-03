@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ page_title }}</title>
+    <style>
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #007bff;
+        }
+        .unread-badge {
+            background: #dc3545;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        .message-list {
+            margin-top: 20px;
+        }
+        .message-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+            border-left: 4px solid #dc3545;
+        }
+        .message-item.read {
+            border-left-color: #28a745;
+            opacity: 0.7;
+        }
+        .message-item:hover {
+            background: #f8f9fa;
+        }
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .message-subject {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #333;
+        }
+        .message-sender {
+            color: #666;
+            font-weight: 500;
+        }
+        .message-preview {
+            color: #666;
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+        .message-meta {
+            display: flex;
+            justify-content: space-between;
+            color: #888;
+            font-size: 0.8em;
+        }
+        .message-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.8em;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .mark-all-read {
+            background: #17a2b8;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <h1>{{ page_title }} <span class="unread-badge">{{ unread_count }} unread</span></h1>
+            <div>
+                <button class="mark-all-read" onclick="markAllRead()">Mark All as Read</button>
+                <a href="{% url 'messaging:inbox_summary' %}" class="btn btn-primary">View All Messages</a>
+                <a href="{% url 'messaging:conversation_list' %}" class="btn btn-primary">Conversations</a>
+            </div>
+        </div>
+        
+        {% if unread_messages %}
+        <div class="message-list">
+            {% for message in unread_messages %}
+            <div class="message-item" id="message-{{ message.id }}">
+                <div class="message-header">
+                    <span class="message-subject">{{ message.subject }}</span>
+                    <span class="message-sender">From: {{ message.sender.username }}</span>
+                </div>
+                <div class="message-preview">
+                    {{ message.content|truncatewords:30 }}
+                </div>
+                <div class="message-meta">
+                    <span>Received: {{ message.timestamp|date:"M d, Y H:i" }}</span>
+                    <span>ID: {{ message.id }}</span>
+                </div>
+                <div class="message-actions">
+                    <a href="{% url 'messaging:message_thread' message.get_thread_root.pk %}" class="btn btn-primary">View Thread</a>
+                    <button class="btn btn-success" onclick="markAsRead({{ message.id }})">Mark as Read</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="icon">🎉</div>
+            <h2>No Unread Messages</h2>
+            <p>You're all caught up! There are no unread messages in your inbox.</p>
+            <a href="{% url 'messaging:inbox_summary' %}" class="btn btn-primary">View All Messages</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function markAsRead(messageId) {
+            fetch(`/messaging/message/${messageId}/mark-read/`, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Remove the message from the list
+                    const messageElement = document.getElementById(`message-${messageId}`);
+                    if (messageElement) {
+                        messageElement.style.opacity = '0';
+                        setTimeout(() => {
+                            messageElement.remove();
+                            updateUnreadCount(data.unread_count);
+                        }, 300);
+                    }
+                }
+            });
+        }
+        
+        function markAllRead() {
+            if (!confirm('Are you sure you want to mark all messages as read?')) {
+                return;
+            }
+            
+            fetch(`{% url 'messaging:mark_all_read' %}`, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Remove all unread messages from the list
+                    document.querySelectorAll('.message-item').forEach(item => {
+                        item.style.opacity = '0';
+                        setTimeout(() => item.remove(), 300);
+                    });
+                    updateUnreadCount(data.unread_count);
+                    
+                    // Show empty state
+                    setTimeout(() => {
+                        const messageList = document.querySelector('.message-list');
+                        if (messageList) {
+                            messageList.innerHTML = `
+                                <div class="empty-state">
+                                    <div class="icon">🎉</div>
+                                    <h2>No Unread Messages</h2>
+                                    <p>You're all caught up! There are no unread messages in your inbox.</p>
+                                    <a href="{% url 'messaging:inbox_summary' %}" class="btn btn-primary">View All Messages</a>
+                                </div>
+                            `;
+                        }
+                    }, 500);
+                }
+            });
+        }
+        
+        function updateUnreadCount(count) {
+            const badge = document.querySelector('.unread-badge');
+            if (badge) {
+                badge.textContent = `${count} unread`;
+                if (count === 0) {
+                    badge.style.background = '#28a745';
+                }
+            }
+        }
+        
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
+</body>
+</html>
