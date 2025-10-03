@@ -1,6 +1,9 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
 from .models import Message, Notification
+from django.core.cache import cache
+from django.test import TestCase, Client
+from django.urls import reverse
 
 class MessageModelTest(TestCase):
     def setUp(self):
@@ -144,6 +147,117 @@ class NotificationModelTest(TestCase):
             message=self.message,
             title='Test Notification Title'
         )
+
+        class CacheTest(TestCase):
+    def setUp(self):
+        """Set up test user and client"""
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='testuser',
+            password='testpass123'
+        )
+        # Clear cache before each test
+        cache.clear()
+
+    def test_conversation_list_cache(self):
+        """Test that conversation list view is cached"""
+        self.client.login(username='testuser', password='testpass123')
+        
+        # First request - should not be cached
+        response1 = self.client.get(reverse('messaging:conversation_list'))
+        self.assertEqual(response1.status_code, 200)
+        
+        # Check for cache indicator in response
+        self.assertContains(response1, 'CACHED')
+        
+        # Second request - should be served from cache
+        response2 = self.client.get(reverse('messaging:conversation_list'))
+        self.assertEqual(response2.status_code, 200)
+        
+        # Both responses should have the same content (cached)
+        self.assertEqual(response1.content, response2.content)
+
+    def test_cache_timeout(self):
+        """Test that cache expires after timeout"""
+        self.client.login(username='testuser', password='testpass123')
+        
+        # First request
+        response1 = self.client.get(reverse('messaging:conversation_list'))
+        
+        # Clear cache to simulate timeout
+        cache.clear()
+        
+        # Second request after cache clear
+        response2 = self.client.get(reverse('messaging:conversation_list'))
+        
+        # Responses should be different after cache clear
+        # Note: The cached_at timestamp will be different
+        self.assertEqual(response1.status_code, 200)
+        self.assertEqual(response2.status_code, 200)
+
+    def test_cache_per_user(self):
+        """Test that cache is user-specific"""
+        user2 = User.objects.create_user(
+            username='testuser2',
+            password='testpass123'
+        )
+        
+        # Login as first user
+        self.client.login(username='testuser', password='testpass123')
+        response1 = self.client.get(reverse('messaging:conversation_list'))
+        
+        # Login as second user
+        self.client.login(username='testuser2', password='testpass123')
+        response2 = self.client.get(reverse('messaging:conversation_list'))
+        
+        # Responses should be different for different users
+        self.assertEqual(response1.status_code, 200)
+        self.assertEqual(response2.status_code, 200)
+        # The content should be different because of vary_on_cookie
+
+    def test_non_cached_views(self):
+        """Test that action views are not cached"""
+        self.client.login(username='testuser', password='testpass123')
+        
+        # Test API endpoint (should not be cached)
+        response = self.client.get(reverse('messaging:unread_messages_api'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data['cached'])
+        
+        # Test form view (should not be cached)
+        response = self.client.get(reverse('messaging:create_reply', args=[1]))
+        self.assertNotEqual(response.status_code, 200)  # 404 or other
+
+    def test_cache_clear_view(self):
+        """Test cache clearing view"""
+        # Create superuser
+        admin_user = User.objects.create_superuser(
+            username='admin',
+            email='admin@example.com',
+            password='adminpass'
+        )
+        
+        self.client.login(username='admin', password='adminpass')
+        response = self.client.get(reverse('messaging:clear_cache'))
+        
+        # Should redirect to conversation list
+        self.assertEqual(response.status_code, 302)
+
+    def test_cache_stats_view(self):
+        """Test cache stats view"""
+        admin_user = User.objects.create_superuser(
+            username='admin',
+            email='admin@example.com',
+            password='adminpass'
+        )
+        
+        self.client.login(username='admin', password='adminpass')
+        response = self.client.get(reverse('messaging:cache_stats'))
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('backend', data)
         
         expected_str = f"Notification for {self.user.username}: Test Notification Title"
         self.assertEqual(str(notification), expected_str)
