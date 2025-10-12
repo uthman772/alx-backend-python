@@ -1,33 +1,31 @@
-# Use official Python runtime as base image
 FROM python:3.10-slim
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
-# Set work directory
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    default-libmysqlclient-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
+# Copy requirements and install dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Copy project code
+# Copy project
 COPY . .
 
-# Collect static files (if using Django)
-RUN python manage.py collectstatic --noinput
+# Create wait_for_db script
+RUN chmod +x wait_for_db.sh
 
-# Expose the port the app runs on
+# Expose port
 EXPOSE 8000
 
-# Command to run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "messaging_app.wsgi:application"]
+# Default command (can be overridden in docker-compose)
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
