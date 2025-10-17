@@ -1,0 +1,235 @@
+#!/bin/bash
+
+# kurbeScript - Kubernetes Setup and Verification Script
+# This script installs Minikube (if not present), starts a Kubernetes cluster,
+# and verifies the cluster status
+
+set -e  # Exit on any error
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check if running on supported OS
+check_os() {
+    log_info "Checking operating system..."
+    if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
+        log_success "Supported OS detected: $(uname -s)"
+    else
+        log_error "Unsupported operating system: $OSTYPE"
+        exit 1
+    fi
+}
+
+# Check if kubectl is installed
+check_kubectl() {
+    log_info "Checking if kubectl is installed..."
+    if command -v kubectl &> /dev/null; then
+        log_success "kubectl is already installed: $(kubectl version --client --short 2>/dev/null || echo "kubectl found")"
+    else
+        log_warning "kubectl not found. Installing..."
+        install_kubectl
+    fi
+}
+
+# Install kubectl based on OS
+install_kubectl() {
+    case "$(uname -s)" in
+        Linux*)
+            # Install kubectl for Linux
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+            ;;
+        Darwin*)
+            # Install kubectl for macOS
+            if command -v brew &> /dev/null; then
+                brew install kubectl
+            else
+                curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/darwin/amd64/kubectl"
+                chmod +x kubectl
+                sudo mv kubectl /usr/local/bin/
+            fi
+            ;;
+        *)
+            log_error "Unsupported OS for automatic kubectl installation"
+            exit 1
+            ;;
+    esac
+    log_success "kubectl installed successfully"
+}
+
+# Check if Minikube is installed
+check_minikube() {
+    log_info "Checking if Minikube is installed..."
+    if command -v minikube &> /dev/null; then
+        log_success "Minikube is already installed: $(minikube version --short 2>/dev/null || echo "minikube found")"
+    else
+        log_warning "Minikube not found. Installing..."
+        install_minikube
+    fi
+}
+
+# Install Minikube based on OS
+install_minikube() {
+    case "$(uname -s)" in
+        Linux*)
+            # Install Minikube for Linux
+            curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+            sudo install minikube-linux-amd64 /usr/local/bin/minikube
+            rm minikube-linux-amd64
+            ;;
+        Darwin*)
+            # Install Minikube for macOS
+            if command -v brew &> /dev/null; then
+                brew install minikube
+            else
+                curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-darwin-amd64
+                sudo install minikube-darwin-amd64 /usr/local/bin/minikube
+                rm minikube-darwin-amd64
+            fi
+            ;;
+        *)
+            log_error "Unsupported OS for automatic Minikube installation"
+            exit 1
+            ;;
+    esac
+    log_success "Minikube installed successfully"
+}
+
+# Check if a virtualization driver is available
+check_virtualization() {
+    log_info "Checking virtualization support..."
+    case "$(uname -s)" in
+        Linux*)
+            if grep -E --color '(vmx|svm)' /proc/cpuinfo > /dev/null; then
+                log_success "Virtualization support detected"
+            else
+                log_warning "Virtualization support not detected. Minikube will use Docker driver."
+            fi
+            ;;
+        Darwin*)
+            log_success "macOS detected - virtualization should be available via HyperKit"
+            ;;
+    esac
+}
+
+# Start Minikube cluster
+start_cluster() {
+    log_info "Starting Minikube cluster..."
+    
+    # Check if cluster is already running
+    if minikube status | grep -q "Running"; then
+        log_warning "Minikube cluster is already running"
+        return 0
+    fi
+    
+    # Try to start with preferred driver, fallback to docker
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        minikube start --driver=hyperkit || minikube start --driver=docker
+    else
+        minikube start --driver=docker
+    fi
+    
+    if [ $? -eq 0 ]; then
+        log_success "Minikube cluster started successfully"
+    else
+        log_error "Failed to start Minikube cluster"
+        exit 1
+    fi
+}
+
+# Verify cluster is running
+verify_cluster() {
+    log_info "Verifying cluster status..."
+    
+    # Check cluster info
+    log_info "Cluster information:"
+    kubectl cluster-info
+    
+    if [ $? -eq 0 ]; then
+        log_success "Cluster is running and accessible"
+    else
+        log_error "Cluster is not accessible"
+        exit 1
+    fi
+    
+    # Check nodes
+    log_info "Cluster nodes:"
+    kubectl get nodes
+    
+    # Verify node is ready
+    if kubectl get nodes | grep -q "Ready"; then
+        log_success "Cluster node is in Ready state"
+    else
+        log_error "Cluster node is not ready"
+        exit 1
+    fi
+}
+
+# Retrieve available pods
+get_pods() {
+    log_info "Retrieving available pods..."
+    
+    # Wait a moment for system pods to initialize
+    sleep 10
+    
+    log_info "All pods in all namespaces:"
+    kubectl get pods --all-namespaces
+    
+    log_info "Pods in kube-system namespace:"
+    kubectl get pods -n kube-system
+    
+    # Check if core pods are running
+    log_info "Checking core system pods..."
+    local core_pods=$(kubectl get pods -n kube-system -o jsonpath='{.items[*].metadata.name}')
+    log_info "Core system pods: $core_pods"
+}
+
+# Main execution function
+main() {
+    log_info "Starting Kubernetes cluster setup..."
+    
+    # Check prerequisites
+    check_os
+    check_kubectl
+    check_minikube
+    check_virtualization
+    
+    # Start cluster
+    start_cluster
+    
+    # Verify cluster
+    verify_cluster
+    
+    # Get pods
+    get_pods
+    
+    log_success "Kubernetes cluster setup completed successfully!"
+    log_info "You can now use 'kubectl' to interact with your cluster"
+    log_info "To stop the cluster, run: minikube stop"
+    log_info "To delete the cluster, run: minikube delete"
+}
+
+# Run main function
+main "$@"
